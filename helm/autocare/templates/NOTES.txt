@@ -1,0 +1,55 @@
+AutoCare has been deployed.
+
+Release      : {{ .Release.Name }}
+Namespace    : {{ .Release.Namespace }}
+Environment  : {{ .Values.environment }}
+Image        : {{ .Values.image.repository }}:{{ .Values.image.tag }}
+
+--------------------------------------------------------------------------
+1) Check rollout status:
+
+   kubectl rollout status deployment/{{ include "autocare.fullname" . }} -n {{ .Release.Namespace }}
+
+2) Check pods:
+
+   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+{{- if .Values.ingress.enabled }}
+
+3) The application is exposed through an AWS Application Load Balancer
+   provisioned by the AWS Load Balancer Controller. It can take 1-3 minutes
+   after the first deploy for the ALB to finish provisioning and for DNS to
+   resolve. Fetch its public hostname:
+
+   kubectl get ingress {{ include "autocare.fullname" . }} -n {{ .Release.Namespace }} \
+     -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+
+   Then open in your browser:
+{{- if .Values.ingress.certificateArn }}
+   https://<hostname-from-above>{{ if .Values.ingress.hostname }} or https://{{ .Values.ingress.hostname }}{{ end }}
+{{- else }}
+   http://<hostname-from-above>{{ if .Values.ingress.hostname }} or http://{{ .Values.ingress.hostname }}{{ end }}
+{{- end }}
+
+   No custom domain or Route 53 record is required - the ALB's own
+   auto-generated DNS name is sufficient.
+{{- else }}
+
+3) Ingress is disabled for this release. Access the application locally via
+   port-forward:
+
+   kubectl port-forward svc/{{ include "autocare.fullname" . }} 8080:{{ .Values.service.port }} -n {{ .Release.Namespace }}
+
+   Then open http://localhost:8080
+{{- end }}
+
+4) Database credentials are retrieved at runtime from AWS Secrets Manager
+   ({{ .Values.secrets.awsSecretName }}) via the Secrets Store CSI Driver /
+   ASCP, and synchronized into the Kubernetes Secret
+   "{{ .Values.secrets.syncSecretName }}". No credentials are stored in Git
+   or in this Helm release's values.
+
+5) View application logs:
+
+   kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} -f
+--------------------------------------------------------------------------

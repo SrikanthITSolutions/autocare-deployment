@@ -1,0 +1,17 @@
+apiVersion: v2
+name: autocare
+description: Helm chart for deploying the AutoCare Vehicle Service Management Platform to Amazon EKS
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - autocare
+  - spring-boot
+  - eks
+  - vehicle-service-management
+home: https://github.com/Srikanth-IT-Solutions/autocare-deployment
+sources:
+  - https://github.com/Srikanth-IT-Solutions/autocare-platform
+  - https://github.com/Srikanth-IT-Solutions/autocare-infrastructure
+maintainers:
+  - name: Srikanth-IT-Solutions

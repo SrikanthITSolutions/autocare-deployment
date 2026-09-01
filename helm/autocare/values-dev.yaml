@@ -1,0 +1,43 @@
+# =============================================================================
+# AutoCare - development environment overrides.
+# Merged on top of values.yaml: helm upgrade --install -f values.yaml -f values-dev.yaml
+# =============================================================================
+
+environment: dev
+
+replicaCount: 1
+
+image:
+  pullPolicy: IfNotPresent
+
+config:
+  springProfilesActive: dev
+
+secrets:
+  secretProviderClass:
+    name: "autocare-dev-database-secrets"
+  awsSecretName: "autocare/dev/database"
+  syncSecretName: "autocare-dev-db-credentials"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Autoscaling is unnecessary noise for a single-replica dev environment.
+autoscaling:
+  enabled: false
+
+# A PDB with a single replica would simply block all voluntary disruptions.
+pdb:
+  enabled: false
+
+ingress:
+  enabled: true
+  scheme: internet-facing
+  hostname: ""            # accessed via the ALB's auto-generated DNS name
+  certificateArn: ""      # HTTP only in dev
+  sslRedirect: false

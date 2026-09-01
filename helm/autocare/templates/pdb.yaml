@@ -1,0 +1,23 @@
+{{/*
+PodDisruptionBudget - maintains application availability during voluntary
+disruptions (node drains, cluster/node upgrades). Optional - disabled by
+default, recommended for production (see values-prod.yaml).
+*/}}
+{{- if .Values.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "autocare.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "autocare.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.pdb.minAvailable }}
+  minAvailable: {{ .Values.pdb.minAvailable }}
+  {{- else if .Values.pdb.maxUnavailable }}
+  maxUnavailable: {{ .Values.pdb.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "autocare.selectorLabels" . | nindent 6 }}
+{{- end }}

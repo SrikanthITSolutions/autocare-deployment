@@ -1,0 +1,203 @@
+# =============================================================================
+# AutoCare Helm chart - default/common values.
+#
+# This file holds values shared across ALL environments. Environment-specific
+# overrides live in values-dev.yaml and values-prod.yaml and are merged on
+# top of this file (helm upgrade --install -f values.yaml -f values-<env>.yaml).
+#
+# Do NOT put real secrets in this file, or any values file. Sensitive
+# credentials are retrieved at runtime from AWS Secrets Manager - see
+# secrets.* below and templates/secretproviderclass.yaml.
+# =============================================================================
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Logical environment name. Overridden per values-<env>.yaml file.
+environment: dev
+
+# -----------------------------------------------------------------------------
+# Image - the tag (and usually the repository) is supplied dynamically by
+# Jenkins via --set image.repository=... --set image.tag=... . Never hard-code
+# an image tag here, and never default to "latest".
+# -----------------------------------------------------------------------------
+image:
+  repository: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+replicaCount: 2
+
+containerPort: 8080
+
+# -----------------------------------------------------------------------------
+# Deployment rollout strategy
+# -----------------------------------------------------------------------------
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+    maxSurge: 1
+
+# -----------------------------------------------------------------------------
+# Dedicated ServiceAccount (never uses "default").
+# Set annotations."eks.amazonaws.com/role-arn" when using IRSA.
+# Leave annotations empty when using modern EKS Pod Identity - the
+# infrastructure layer associates the IAM role to this ServiceAccount's
+# name/namespace out-of-band.
+# -----------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  name: "autocare"
+  annotations: {}
+    # eks.amazonaws.com/role-arn: "arn:aws:iam::<ACCOUNT_ID>:role/autocare-<env>-secrets-role"
+
+podAnnotations: {}
+
+# -----------------------------------------------------------------------------
+# Pod-level security context (applies to all containers in the pod)
+# -----------------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# -----------------------------------------------------------------------------
+# Container-level security context
+# -----------------------------------------------------------------------------
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# -----------------------------------------------------------------------------
+# Kubernetes Service - ClusterIP only. Never NodePort. External access is via
+# Ingress -> AWS Load Balancer Controller -> ALB.
+# -----------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+# -----------------------------------------------------------------------------
+# Resource requests/limits
+# -----------------------------------------------------------------------------
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+# -----------------------------------------------------------------------------
+# Health probes - backed by Spring Boot Actuator (/actuator/health).
+# All are individually configurable and can be disabled if not needed.
+# -----------------------------------------------------------------------------
+probes:
+  startup:
+    enabled: true
+    path: /actuator/health
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    failureThreshold: 30
+    timeoutSeconds: 3
+  readiness:
+    enabled: true
+    path: /actuator/health
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    failureThreshold: 3
+    timeoutSeconds: 3
+  liveness:
+    enabled: true
+    path: /actuator/health
+    initialDelaySeconds: 30
+    periodSeconds: 15
+    failureThreshold: 3
+    timeoutSeconds: 3
+
+# -----------------------------------------------------------------------------
+# Non-sensitive application configuration (rendered into a ConfigMap and
+# injected via envFrom). Never put credentials here.
+# -----------------------------------------------------------------------------
+config:
+  springProfilesActive: dev
+  extra: {}
+    # SOME_NON_SECRET_KEY: "some-value"
+
+# -----------------------------------------------------------------------------
+# AWS Secrets Manager integration.
+#
+# awsSecretName        - the AWS Secrets Manager secret name/path, e.g.
+#                         "autocare/dev/database". Set per environment.
+# secretProviderClass   - the SecretProviderClass created by this chart.
+# syncSecretName        - the Kubernetes Secret name that the CSI driver
+#                         syncs the AWS secret into (secretObjects). The
+#                         Deployment reads DB_* env vars from this Secret
+#                         via secretKeyRef. This Secret is NEVER created
+#                         manually with real values - it is populated only
+#                         by the Secrets Store CSI Driver / ASCP.
+# region                - optional explicit AWS region for the provider.
+#                         Leave empty to use the cluster/node default region.
+# -----------------------------------------------------------------------------
+secrets:
+  secretProviderClass:
+    enabled: true
+    name: "autocare-database-secrets"
+  awsSecretName: "autocare/dev/database"
+  syncSecretName: "autocare-db-credentials"
+  region: ""
+
+# -----------------------------------------------------------------------------
+# HorizontalPodAutoscaler (autoscaling/v2). Optional - requires the
+# Kubernetes Metrics Server to be running in the cluster. If disabled or if
+# metrics are unavailable, replicaCount above is used as-is.
+# -----------------------------------------------------------------------------
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 75
+
+# -----------------------------------------------------------------------------
+# PodDisruptionBudget - keeps the application available during voluntary
+# node disruptions (e.g. node drains, cluster upgrades).
+# -----------------------------------------------------------------------------
+pdb:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1   # use either minAvailable OR maxUnavailable, not both
+
+# -----------------------------------------------------------------------------
+# Ingress -> AWS Load Balancer Controller (ALB).
+#
+# No custom domain or Route 53 record is required: with hostname left empty,
+# the ALB is reachable immediately via its auto-assigned public DNS name
+# (visible in `kubectl get ingress`). Hostname / TLS / ACM certificate are
+# optional future enhancements.
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: alb
+  scheme: internet-facing        # internet-facing | internal
+  targetType: ip                 # required for Fargate/awsvpc-style pod IPs and general best practice
+  healthCheckPath: /actuator/health
+  hostname: ""                   # optional; leave empty to rely on the ALB's auto-generated DNS name
+  certificateArn: ""             # optional ACM certificate ARN; when set, HTTPS (443) listener is enabled
+  sslRedirect: false             # when true (and certificateArn set), HTTP->HTTPS redirect is enabled
+  annotations: {}                # extra alb.ingress.kubernetes.io/* annotations, e.g. security groups, subnets
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

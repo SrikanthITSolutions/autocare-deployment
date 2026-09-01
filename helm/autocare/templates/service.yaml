@@ -1,0 +1,20 @@
+{{/*
+ClusterIP Service only. External exposure is handled exclusively by the
+Ingress (AWS Load Balancer Controller / ALB) - never NodePort.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "autocare.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "autocare.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+  selector:
+    {{- include "autocare.selectorLabels" . | nindent 4 }}

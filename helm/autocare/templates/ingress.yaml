@@ -1,0 +1,51 @@
+{{/*
+Ingress for the AWS Load Balancer Controller (ALB).
+
+No custom domain or Route 53 record is required to reach the application:
+leave .Values.ingress.hostname empty and the Ingress creates a host-agnostic
+rule, so the application is immediately reachable via the ALB's own
+auto-generated public DNS name (visible via `kubectl get ingress`).
+
+HTTPS/ACM and a custom hostname are optional future enhancements - set
+.Values.ingress.certificateArn and .Values.ingress.hostname when ready.
+*/}}
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "autocare.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "autocare.labels" . | nindent 4 }}
+  annotations:
+    alb.ingress.kubernetes.io/scheme: {{ .Values.ingress.scheme }}
+    alb.ingress.kubernetes.io/target-type: {{ .Values.ingress.targetType }}
+    alb.ingress.kubernetes.io/healthcheck-path: {{ .Values.ingress.healthCheckPath }}
+    {{- if .Values.ingress.certificateArn }}
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/certificate-arn: {{ .Values.ingress.certificateArn }}
+    {{- if .Values.ingress.sslRedirect }}
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+    {{- end }}
+    {{- else }}
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "autocare.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+      {{- if .Values.ingress.hostname }}
+      host: {{ .Values.ingress.hostname }}
+      {{- end }}
+{{- end }}

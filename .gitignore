@@ -1,0 +1,42 @@
+# Secrets / credentials - never commit real values
+*.env
+.env
+.env.*
+*credentials*
+*secret*.yaml
+!helm/autocare/templates/secretproviderclass.yaml
+!k8s/examples/secret-shape-example.json
+aws-credentials
+.aws/
+
+# Kubeconfig
+kubeconfig
+kubeconfig.yaml
+*.kubeconfig
+
+# Terraform state (defense-in-depth; Terraform itself lives in autocare-infrastructure)
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Helm
+*.tgz
+helm/**/charts/
+helm/**/Chart.lock
+
+# Rendered manifests / Jenkins artifacts
+rendered-manifests.yaml
+*.rendered.yaml
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# Local temp / logs
+*.log
+tmp/
+temp/

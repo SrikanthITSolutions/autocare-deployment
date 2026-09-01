@@ -1,0 +1,19 @@
+{{/*
+Non-sensitive application configuration only.
+DB_USERNAME / DB_PASSWORD / DB_HOST / DB_PORT / DB_NAME are NEVER placed
+here - they are sourced exclusively from the Kubernetes Secret synchronized
+by the Secrets Store CSI Driver from AWS Secrets Manager (see
+secretproviderclass.yaml and deployment.yaml).
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "autocare.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "autocare.labels" . | nindent 4 }}
+data:
+  SPRING_PROFILES_ACTIVE: {{ .Values.config.springProfilesActive | quote }}
+  {{- range $key, $value := .Values.config.extra }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
