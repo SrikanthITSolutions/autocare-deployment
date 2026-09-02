@@ -72,6 +72,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.syncSecretName }}
                   key: DB_PASSWORD
+            - name: REMEMBER_ME_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.syncSecretName }}
+                  key: REMEMBER_ME_KEY
           {{- if .Values.probes.startup.enabled }}
           startupProbe:
             httpGet:

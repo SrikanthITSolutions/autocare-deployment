@@ -12,6 +12,8 @@ image:
 
 config:
   springProfilesActive: prod
+  extra:
+    DEMO_DATA_ENABLED: "false"
 
 secrets:
   secretProviderClass:

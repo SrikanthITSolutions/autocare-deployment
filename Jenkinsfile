@@ -26,10 +26,11 @@ pipeline {
     parameters {
         choice(name: 'ENVIRONMENT', choices: ['dev', 'prod'], description: 'Target deployment environment')
         string(name: 'IMAGE_TAG', defaultValue: '', description: 'Immutable image tag already pushed to ECR by the CI pipeline (e.g. Git SHA or build number). "latest" is rejected for prod.')
-        string(name: 'ECR_REPOSITORY', defaultValue: '', description: 'Full ECR repository URI, e.g. <account-id>.dkr.ecr.ap-south-1.amazonaws.com/autocare')
-        string(name: 'AWS_REGION', defaultValue: 'ap-south-1', description: 'AWS region')
+        string(name: 'ECR_REPOSITORY', defaultValue: '', description: 'Full ECR repository URI, e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/autocare')
+        string(name: 'AWS_REGION', defaultValue: 'us-east-1', description: 'AWS region')
         string(name: 'EKS_CLUSTER_NAME', defaultValue: '', description: 'EKS cluster name, e.g. autocare-dev-eks')
         string(name: 'NAMESPACE', defaultValue: 'autocare', description: 'Kubernetes namespace to deploy into')
+        string(name: 'IRSA_ROLE_ARN', defaultValue: '', description: 'IAM role ARN for the AutoCare ServiceAccount (IRSA), e.g. arn:aws:iam::<account>:role/autocare-dev-secrets-role. Leave empty to fall back to whatever is already in the values file (not recommended - Secrets Manager access will fail without it).')
     }
 
     environment {
@@ -64,6 +65,12 @@ pipeline {
                     if (!fileExists("${CHART_DIR}/values-${params.ENVIRONMENT}.yaml")) {
                         error "No values file found for environment '${params.ENVIRONMENT}' at ${CHART_DIR}/values-${params.ENVIRONMENT}.yaml"
                     }
+                    // Single-quoted on purpose: these strings are spliced unquoted into later
+                    // sh scripts, and only a shell-preserved literal backslash before each dot
+                    // stops Helm's --set from treating "eks.amazonaws.com" as three nested keys.
+                    env.HELM_IRSA_ARGS = params.IRSA_ROLE_ARN?.trim()
+                        ? "--set 'serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn=${params.IRSA_ROLE_ARN.trim()}'"
+                        : ''
                     echo "Validated parameters for environment=${params.ENVIRONMENT}, image=${params.ECR_REPOSITORY}:${params.IMAGE_TAG}"
                 }
             }
@@ -89,6 +96,7 @@ pipeline {
                       -f ${CHART_DIR}/values-${params.ENVIRONMENT}.yaml \
                       --set image.repository=${params.ECR_REPOSITORY} \
                       --set image.tag=${params.IMAGE_TAG} \
+                      ${HELM_IRSA_ARGS} \
                       > rendered-manifests.yaml
                 """
                 archiveArtifacts artifacts: 'rendered-manifests.yaml', fingerprint: true
@@ -147,6 +155,7 @@ pipeline {
                           -f ${CHART_DIR}/values-${params.ENVIRONMENT}.yaml \
                           --set image.repository=${params.ECR_REPOSITORY} \
                           --set image.tag=${params.IMAGE_TAG} \
+                          ${HELM_IRSA_ARGS} \
                           --dry-run
                     """
                 }
@@ -163,6 +172,7 @@ pipeline {
                           -f ${CHART_DIR}/values-${params.ENVIRONMENT}.yaml \
                           --set image.repository=${params.ECR_REPOSITORY} \
                           --set image.tag=${params.IMAGE_TAG} \
+                          ${HELM_IRSA_ARGS} \
                           --wait \
                           --atomic \
                           --timeout 10m

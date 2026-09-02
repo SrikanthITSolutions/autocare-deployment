@@ -9,9 +9,9 @@ keywords:
   - spring-boot
   - eks
   - vehicle-service-management
-home: https://github.com/Srikanth-IT-Solutions/autocare-deployment
+home: https://github.com/SrikanthITSolutions/autocare-deployment
 sources:
-  - https://github.com/Srikanth-IT-Solutions/autocare-platform
-  - https://github.com/Srikanth-IT-Solutions/autocare-infrastructure
+  - https://github.com/SrikanthITSolutions/autocare-platform
+  - https://github.com/SrikanthITSolutions/autocare-infrastructure
 maintainers:
-  - name: Srikanth-IT-Solutions
+  - name: SrikanthITSolutions

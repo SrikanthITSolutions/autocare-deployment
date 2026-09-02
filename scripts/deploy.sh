@@ -3,14 +3,14 @@
 # deploy.sh - deploy AutoCare to EKS outside of Jenkins (local/manual testing).
 #
 # Usage:
-#   ./scripts/deploy.sh <environment> <image-tag> [ecr-repository] [aws-region] [eks-cluster-name] [namespace]
+#   ./scripts/deploy.sh <environment> <image-tag> [ecr-repository] [aws-region] [eks-cluster-name] [namespace] [irsa-role-arn]
 #
-# Positional args 3-6 fall back to environment variables of the same name
-# (ECR_REPOSITORY, AWS_REGION, EKS_CLUSTER_NAME, NAMESPACE) if omitted.
+# Positional args 3-7 fall back to environment variables of the same name
+# (ECR_REPOSITORY, AWS_REGION, EKS_CLUSTER_NAME, NAMESPACE, IRSA_ROLE_ARN) if omitted.
 #
 # Examples:
 #   ./scripts/deploy.sh dev abc1234
-#   ECR_REPOSITORY=123456789012.dkr.ecr.ap-south-1.amazonaws.com/autocare \
+#   ECR_REPOSITORY=123456789012.dkr.ecr.us-east-1.amazonaws.com/autocare \
 #     ./scripts/deploy.sh prod 9f3c2d1
 #
 set -euo pipefail
@@ -27,10 +27,16 @@ fi
 ENVIRONMENT="$1"
 IMAGE_TAG="$2"
 ECR_REPOSITORY="${3:-${ECR_REPOSITORY:-}}"
-AWS_REGION="${4:-${AWS_REGION:-ap-south-1}}"
+AWS_REGION="${4:-${AWS_REGION:-us-east-1}}"
 EKS_CLUSTER_NAME="${5:-${EKS_CLUSTER_NAME:-autocare-${ENVIRONMENT}-eks}}"
 NAMESPACE="${6:-${NAMESPACE:-autocare}}"
+IRSA_ROLE_ARN="${7:-${IRSA_ROLE_ARN:-}}"
 RELEASE_NAME="autocare"
+
+HELM_IRSA_ARGS=()
+if [[ -n "$IRSA_ROLE_ARN" ]]; then
+  HELM_IRSA_ARGS=(--set "serviceAccount.annotations.eks\.amazonaws\.com/role-arn=${IRSA_ROLE_ARN}")
+fi
 
 if [[ "$ENVIRONMENT" != "dev" && "$ENVIRONMENT" != "prod" ]]; then
   echo "ERROR: environment must be 'dev' or 'prod' (got '${ENVIRONMENT}')"
@@ -97,6 +103,7 @@ helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
   -f "${VALUES_FILE}" \
   --set image.repository="${ECR_REPOSITORY}" \
   --set image.tag="${IMAGE_TAG}" \
+  "${HELM_IRSA_ARGS[@]}" \
   --dry-run
 
 echo "==> helm upgrade --install"
@@ -106,6 +113,7 @@ helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
   -f "${VALUES_FILE}" \
   --set image.repository="${ECR_REPOSITORY}" \
   --set image.tag="${IMAGE_TAG}" \
+  "${HELM_IRSA_ARGS[@]}" \
   --wait \
   --atomic \
   --timeout 10m
