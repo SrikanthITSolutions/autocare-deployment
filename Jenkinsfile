@@ -36,7 +36,7 @@ pipeline {
     environment {
         RELEASE_NAME       = 'autocare'
         CHART_DIR          = 'helm/autocare'
-        AWS_CREDENTIALS_ID = 'aws-eks-deployer' // Jenkins credential id (AWS Credentials kind); remove usage if relying on an instance/IRSA role instead
+        AWS_CREDENTIALS_ID = 'aws-autocare-creds' // Same credential used by autocare-infrastructure and autocare-platform; remove usage if relying on an instance/IRSA role instead
     }
 
     stages {

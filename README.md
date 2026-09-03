@@ -275,7 +275,7 @@ The `Jenkinsfile` pipeline takes these parameters: `ENVIRONMENT`, `IMAGE_TAG`, `
 
 Stages: Checkout → Validate Environment → Helm Version → Helm Lint → Helm Template → AWS Authentication → Update Kubeconfig → Verify EKS Access → Verify ECR Image → Helm Dry Run → Helm Upgrade/Install → Wait for Rollout → Verify Pods → Verify Service → Verify Ingress → Display Application Information.
 
-AWS authentication uses a Jenkins "AWS Credentials" credential (`aws-eks-deployer`, configurable in `Jenkinsfile`'s `environment` block) — never hard-coded keys. If Jenkins agents already run under an IAM instance role or IRSA, remove the `withCredentials` wrapper and the same `aws`/`kubectl` commands will pick up ambient credentials.
+AWS authentication uses a Jenkins "AWS Credentials" credential (`aws-autocare-creds` — the same one used by `autocare-infrastructure` and `autocare-platform`, configurable in `Jenkinsfile`'s `environment` block) — never hard-coded keys. If Jenkins agents already run under an IAM instance role or IRSA, remove the `withCredentials` wrapper and the same `aws`/`kubectl` commands will pick up ambient credentials.
 
 The pipeline fails fast (and does not proceed) on: missing parameters, `latest` tag in prod, missing values file, missing ECR image, failed Helm lint/dry-run, failed rollout, or unhealthy pods/service/ingress.
 
