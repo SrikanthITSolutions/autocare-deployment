@@ -7,6 +7,13 @@
  * already-pushed image tag from Amazon ECR and deploys it to Amazon EKS via
  * Helm.
  *
+ * Only ENVIRONMENT and IMAGE_TAG ever need to be typed in by hand. Every
+ * other parameter (ECR_REPOSITORY, AWS_REGION, EKS_CLUSTER_NAME, NAMESPACE,
+ * IRSA_ROLE_ARN) auto-resolves from /autocare/<environment>/* in SSM
+ * Parameter Store - the same values autocare-infrastructure's Terraform
+ * publishes and autocare-platform's CI pipeline already reads - if left
+ * blank. Pass an explicit value for any of them to override the default.
+ *
  * AWS authentication: no AWS access keys are hard-coded here. Configure a
  * Jenkins credential of kind "AWS Credentials" (or use an EC2 instance
  * profile / EKS-hosted-agent IAM role, in which case the withCredentials
@@ -25,12 +32,12 @@ pipeline {
 
     parameters {
         choice(name: 'ENVIRONMENT', choices: ['dev', 'prod'], description: 'Target deployment environment')
-        string(name: 'IMAGE_TAG', defaultValue: '', description: 'Immutable image tag already pushed to ECR by the CI pipeline (e.g. Git SHA or build number). "latest" is rejected for prod.')
-        string(name: 'ECR_REPOSITORY', defaultValue: '', description: 'Full ECR repository URI, e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/autocare')
-        string(name: 'AWS_REGION', defaultValue: 'us-east-1', description: 'AWS region')
-        string(name: 'EKS_CLUSTER_NAME', defaultValue: '', description: 'EKS cluster name, e.g. autocare-dev-eks')
-        string(name: 'NAMESPACE', defaultValue: 'autocare', description: 'Kubernetes namespace to deploy into')
-        string(name: 'IRSA_ROLE_ARN', defaultValue: '', description: 'IAM role ARN for the AutoCare ServiceAccount (IRSA), e.g. arn:aws:iam::<account>:role/autocare-dev-secrets-role. Leave empty to fall back to whatever is already in the values file (not recommended - Secrets Manager access will fail without it).')
+        string(name: 'IMAGE_TAG', defaultValue: '', description: 'Immutable image tag already pushed to ECR by the CI pipeline (e.g. Git SHA or build number). "latest" is rejected for prod. The one value you always have to provide - everything else below auto-resolves from SSM Parameter Store if left blank.')
+        string(name: 'ECR_REPOSITORY', defaultValue: '', description: 'Full ECR repository URI. Leave blank to auto-resolve from /autocare/<environment>/ecr_repository_url.')
+        string(name: 'AWS_REGION', defaultValue: '', description: 'AWS region. Leave blank to auto-resolve from /autocare/<environment>/aws_region.')
+        string(name: 'EKS_CLUSTER_NAME', defaultValue: '', description: 'EKS cluster name. Leave blank to auto-resolve from /autocare/<environment>/eks_cluster_name.')
+        string(name: 'NAMESPACE', defaultValue: '', description: 'Kubernetes namespace to deploy into. Leave blank to auto-resolve from /autocare/<environment>/namespace.')
+        string(name: 'IRSA_ROLE_ARN', defaultValue: '', description: 'IAM role ARN for the AutoCare ServiceAccount (IRSA). Leave blank to auto-resolve from /autocare/<environment>/app_irsa_role_arn.')
     }
 
     environment {
@@ -48,6 +55,10 @@ pipeline {
         }
 
         stage('Validate Environment') {
+            // Only ENVIRONMENT and IMAGE_TAG are ever required as input - everything
+            // else auto-resolves from the same /autocare/<environment>/* SSM
+            // parameters the autocare-platform CI pipeline already reads, so a
+            // manual trigger doesn't mean copy-pasting five values by hand.
             steps {
                 script {
                     if (!params.IMAGE_TAG?.trim()) {
@@ -56,22 +67,48 @@ pipeline {
                     if (params.ENVIRONMENT == 'prod' && params.IMAGE_TAG.trim().toLowerCase() == 'latest') {
                         error "The 'latest' image tag is not allowed for production deployments - use an immutable tag (Git SHA/build number)"
                     }
-                    if (!params.ECR_REPOSITORY?.trim()) {
-                        error "ECR_REPOSITORY must be provided"
+                    env.IMAGE_TAG        = params.IMAGE_TAG.trim()
+                    env.ECR_REPOSITORY   = params.ECR_REPOSITORY?.trim()
+                    env.AWS_REGION       = params.AWS_REGION?.trim()
+                    env.EKS_CLUSTER_NAME = params.EKS_CLUSTER_NAME?.trim()
+                    env.NAMESPACE        = params.NAMESPACE?.trim()
+                    env.IRSA_ROLE_ARN    = params.IRSA_ROLE_ARN?.trim()
+
+                    if (!env.ECR_REPOSITORY || !env.AWS_REGION || !env.EKS_CLUSTER_NAME || !env.NAMESPACE || !env.IRSA_ROLE_ARN) {
+                        def ssmPath = "/autocare/${params.ENVIRONMENT}"
+                        // Bootstrap region only to reach SSM itself; the actual
+                        // /aws_region value from SSM wins below if AWS_REGION was blank.
+                        def bootstrapRegion = env.AWS_REGION ?: 'us-east-1'
+                        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: env.AWS_CREDENTIALS_ID]]) {
+                            if (!env.AWS_REGION) {
+                                env.AWS_REGION = sh(script: "aws ssm get-parameter --name ${ssmPath}/aws_region --region ${bootstrapRegion} --query 'Parameter.Value' --output text", returnStdout: true).trim()
+                            }
+                            if (!env.ECR_REPOSITORY) {
+                                env.ECR_REPOSITORY = sh(script: "aws ssm get-parameter --name ${ssmPath}/ecr_repository_url --region ${env.AWS_REGION} --query 'Parameter.Value' --output text", returnStdout: true).trim()
+                            }
+                            if (!env.EKS_CLUSTER_NAME) {
+                                env.EKS_CLUSTER_NAME = sh(script: "aws ssm get-parameter --name ${ssmPath}/eks_cluster_name --region ${env.AWS_REGION} --query 'Parameter.Value' --output text", returnStdout: true).trim()
+                            }
+                            if (!env.NAMESPACE) {
+                                env.NAMESPACE = sh(script: "aws ssm get-parameter --name ${ssmPath}/namespace --region ${env.AWS_REGION} --query 'Parameter.Value' --output text", returnStdout: true).trim()
+                            }
+                            if (!env.IRSA_ROLE_ARN) {
+                                env.IRSA_ROLE_ARN = sh(script: "aws ssm get-parameter --name ${ssmPath}/app_irsa_role_arn --region ${env.AWS_REGION} --query 'Parameter.Value' --output text", returnStdout: true).trim()
+                            }
+                        }
                     }
-                    if (!params.EKS_CLUSTER_NAME?.trim()) {
-                        error "EKS_CLUSTER_NAME must be provided"
-                    }
+
                     if (!fileExists("${CHART_DIR}/values-${params.ENVIRONMENT}.yaml")) {
                         error "No values file found for environment '${params.ENVIRONMENT}' at ${CHART_DIR}/values-${params.ENVIRONMENT}.yaml"
                     }
+
                     // Single-quoted on purpose: these strings are spliced unquoted into later
                     // sh scripts, and only a shell-preserved literal backslash before each dot
                     // stops Helm's --set from treating "eks.amazonaws.com" as three nested keys.
-                    env.HELM_IRSA_ARGS = params.IRSA_ROLE_ARN?.trim()
-                        ? "--set 'serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn=${params.IRSA_ROLE_ARN.trim()}'"
+                    env.HELM_IRSA_ARGS = env.IRSA_ROLE_ARN
+                        ? "--set 'serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn=${env.IRSA_ROLE_ARN}'"
                         : ''
-                    echo "Validated parameters for environment=${params.ENVIRONMENT}, image=${params.ECR_REPOSITORY}:${params.IMAGE_TAG}"
+                    echo "Resolved parameters: environment=${params.ENVIRONMENT}, image=${env.ECR_REPOSITORY}:${env.IMAGE_TAG}, cluster=${env.EKS_CLUSTER_NAME}, namespace=${env.NAMESPACE}, region=${env.AWS_REGION}"
                 }
             }
         }
@@ -92,10 +129,10 @@ pipeline {
             steps {
                 sh """
                     helm template ${RELEASE_NAME} ${CHART_DIR} \
-                      --namespace ${params.NAMESPACE} \
+                      --namespace ${env.NAMESPACE} \
                       -f ${CHART_DIR}/values-${params.ENVIRONMENT}.yaml \
-                      --set image.repository=${params.ECR_REPOSITORY} \
-                      --set image.tag=${params.IMAGE_TAG} \
+                      --set image.repository=${env.ECR_REPOSITORY} \
+                      --set image.tag=${env.IMAGE_TAG} \
                       ${HELM_IRSA_ARGS} \
                       > rendered-manifests.yaml
                 """
@@ -106,7 +143,7 @@ pipeline {
         stage('AWS Authentication') {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: env.AWS_CREDENTIALS_ID]]) {
-                    sh 'aws sts get-caller-identity --region ' + params.AWS_REGION
+                    sh 'aws sts get-caller-identity --region ' + env.AWS_REGION
                 }
             }
         }
@@ -114,7 +151,7 @@ pipeline {
         stage('Update Kubeconfig') {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: env.AWS_CREDENTIALS_ID]]) {
-                    sh "aws eks update-kubeconfig --name ${params.EKS_CLUSTER_NAME} --region ${params.AWS_REGION}"
+                    sh "aws eks update-kubeconfig --name ${env.EKS_CLUSTER_NAME} --region ${env.AWS_REGION}"
                 }
             }
         }
@@ -131,15 +168,15 @@ pipeline {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: env.AWS_CREDENTIALS_ID]]) {
                     script {
-                        def repoName = params.ECR_REPOSITORY.tokenize('/').last()
+                        def repoName = env.ECR_REPOSITORY.tokenize('/').last()
                         def status = sh(
-                            script: "aws ecr describe-images --repository-name ${repoName} --image-ids imageTag=${params.IMAGE_TAG} --region ${params.AWS_REGION}",
+                            script: "aws ecr describe-images --repository-name ${repoName} --image-ids imageTag=${env.IMAGE_TAG} --region ${env.AWS_REGION}",
                             returnStatus: true
                         )
                         if (status != 0) {
-                            error "Image tag '${params.IMAGE_TAG}' was not found in ECR repository '${repoName}'. Deployment aborted."
+                            error "Image tag '${env.IMAGE_TAG}' was not found in ECR repository '${repoName}'. Deployment aborted."
                         }
-                        echo "Confirmed image ${repoName}:${params.IMAGE_TAG} exists in ECR"
+                        echo "Confirmed image ${repoName}:${env.IMAGE_TAG} exists in ECR"
                     }
                 }
             }
@@ -150,11 +187,11 @@ pipeline {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: env.AWS_CREDENTIALS_ID]]) {
                     sh """
                         helm upgrade --install ${RELEASE_NAME} ${CHART_DIR} \
-                          --namespace ${params.NAMESPACE} \
+                          --namespace ${env.NAMESPACE} \
                           --create-namespace \
                           -f ${CHART_DIR}/values-${params.ENVIRONMENT}.yaml \
-                          --set image.repository=${params.ECR_REPOSITORY} \
-                          --set image.tag=${params.IMAGE_TAG} \
+                          --set image.repository=${env.ECR_REPOSITORY} \
+                          --set image.tag=${env.IMAGE_TAG} \
                           ${HELM_IRSA_ARGS} \
                           --dry-run
                     """
@@ -167,11 +204,11 @@ pipeline {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: env.AWS_CREDENTIALS_ID]]) {
                     sh """
                         helm upgrade --install ${RELEASE_NAME} ${CHART_DIR} \
-                          --namespace ${params.NAMESPACE} \
+                          --namespace ${env.NAMESPACE} \
                           --create-namespace \
                           -f ${CHART_DIR}/values-${params.ENVIRONMENT}.yaml \
-                          --set image.repository=${params.ECR_REPOSITORY} \
-                          --set image.tag=${params.IMAGE_TAG} \
+                          --set image.repository=${env.ECR_REPOSITORY} \
+                          --set image.tag=${env.IMAGE_TAG} \
                           ${HELM_IRSA_ARGS} \
                           --wait \
                           --atomic \
@@ -184,7 +221,7 @@ pipeline {
         stage('Wait for Rollout') {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: env.AWS_CREDENTIALS_ID]]) {
-                    sh "kubectl rollout status deployment/${RELEASE_NAME} -n ${params.NAMESPACE} --timeout=300s"
+                    sh "kubectl rollout status deployment/${RELEASE_NAME} -n ${env.NAMESPACE} --timeout=300s"
                 }
             }
         }
@@ -192,7 +229,7 @@ pipeline {
         stage('Verify Pods') {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: env.AWS_CREDENTIALS_ID]]) {
-                    sh "chmod +x scripts/verify.sh && ./scripts/verify.sh ${params.NAMESPACE}"
+                    sh "chmod +x scripts/verify.sh && ./scripts/verify.sh ${env.NAMESPACE}"
                 }
             }
         }
@@ -200,7 +237,7 @@ pipeline {
         stage('Verify Service') {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: env.AWS_CREDENTIALS_ID]]) {
-                    sh "kubectl get svc ${RELEASE_NAME} -n ${params.NAMESPACE}"
+                    sh "kubectl get svc ${RELEASE_NAME} -n ${env.NAMESPACE}"
                 }
             }
         }
@@ -208,7 +245,7 @@ pipeline {
         stage('Verify Ingress') {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: env.AWS_CREDENTIALS_ID]]) {
-                    sh "kubectl get ingress ${RELEASE_NAME} -n ${params.NAMESPACE}"
+                    sh "kubectl get ingress ${RELEASE_NAME} -n ${env.NAMESPACE}"
                 }
             }
         }
@@ -221,15 +258,15 @@ pipeline {
                         echo ' AutoCare Deployment Summary'
                         echo '===================================================='
                         echo " Environment : ${params.ENVIRONMENT}"
-                        echo " Image       : ${params.ECR_REPOSITORY}:${params.IMAGE_TAG}"
-                        echo " Namespace   : ${params.NAMESPACE}"
-                        echo " Cluster     : ${params.EKS_CLUSTER_NAME}"
-                        ALB_HOST=\$(kubectl get ingress ${RELEASE_NAME} -n ${params.NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+                        echo " Image       : ${env.ECR_REPOSITORY}:${env.IMAGE_TAG}"
+                        echo " Namespace   : ${env.NAMESPACE}"
+                        echo " Cluster     : ${env.EKS_CLUSTER_NAME}"
+                        ALB_HOST=\$(kubectl get ingress ${RELEASE_NAME} -n ${env.NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
                         if [ -n "\$ALB_HOST" ]; then
                           echo " Application URL: http://\$ALB_HOST"
                         else
                           echo " ALB hostname not yet available - check again in a few minutes with:"
-                          echo "   kubectl get ingress ${RELEASE_NAME} -n ${params.NAMESPACE}"
+                          echo "   kubectl get ingress ${RELEASE_NAME} -n ${env.NAMESPACE}"
                         fi
                         echo '===================================================='
                     """
@@ -241,7 +278,7 @@ pipeline {
     post {
         failure {
             echo "Deployment FAILED. To roll back to the previous successful release, run:"
-            echo "  ./scripts/rollback.sh ${params.NAMESPACE}"
+            echo "  ./scripts/rollback.sh ${env.NAMESPACE}"
         }
         always {
             sh 'rm -f rendered-manifests.yaml || true'

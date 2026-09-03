@@ -271,7 +271,7 @@ Production additionally enforces (via `scripts/deploy.sh` and the Jenkinsfile): 
 
 ## 15. Jenkins Deployment
 
-The `Jenkinsfile` pipeline takes these parameters: `ENVIRONMENT`, `IMAGE_TAG`, `ECR_REPOSITORY`, `AWS_REGION`, `EKS_CLUSTER_NAME`, `NAMESPACE`, `IRSA_ROLE_ARN`. When triggered by the `autocare-platform` CI pipeline, all of these except `IMAGE_TAG` are resolved automatically from SSM Parameter Store (`/autocare/<env>/*`, published by `autocare-infrastructure`) - nothing is typed in by hand.
+The `Jenkinsfile` pipeline takes these parameters: `ENVIRONMENT`, `IMAGE_TAG`, `ECR_REPOSITORY`, `AWS_REGION`, `EKS_CLUSTER_NAME`, `NAMESPACE`, `IRSA_ROLE_ARN`. Only `ENVIRONMENT` and `IMAGE_TAG` are ever required — every other parameter auto-resolves from SSM Parameter Store (`/autocare/<env>/*`, published by `autocare-infrastructure`) inside the `Validate Environment` stage if left blank, whether the build was triggered automatically by the `autocare-platform` CI pipeline or started manually. Pass an explicit value for any of them to override the auto-resolved default.
 
 Stages: Checkout → Validate Environment → Helm Version → Helm Lint → Helm Template → AWS Authentication → Update Kubeconfig → Verify EKS Access → Verify ECR Image → Helm Dry Run → Helm Upgrade/Install → Wait for Rollout → Verify Pods → Verify Service → Verify Ingress → Display Application Information.
 
